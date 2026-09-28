@@ -683,9 +683,9 @@ protected:
     // webserver handlers
 public:
     void          handleNotFound();
+    void          handleRoot();
 protected:
     void          HTTPSend(const String &content);
-    void          handleRoot();
     void          handleWifi(boolean scan);
     void          handleWifiSave();
     void          handleInfo();
