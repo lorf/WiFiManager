@@ -994,7 +994,6 @@ bool WiFiManager::shutdownConfigPortal(){
   if(!ret)DEBUG_WM(WM_DEBUG_ERROR,F("[ERROR] disconnect configportal - softAPdisconnect FAILED"));
   DEBUG_WM(WM_DEBUG_VERBOSE,F("restoring usermode"),getModeString(_usermode));
   #endif
-  delay(1000);
   WiFi_Mode(_usermode); // restore users wifi mode, BUG https://github.com/esp8266/Arduino/issues/4372
   if(WiFi.status()==WL_IDLE_STATUS){
     WiFi.reconnect(); // restart wifi since we disconnected it in startconfigportal
@@ -1373,11 +1372,15 @@ void WiFiManager::handleWifi(boolean scan) {
   #endif
   handleRequest();
   String page = getHTTPHead(FPSTR(S_titlewifi), FPSTR(C_wifi)); // @token titlewifi
+  // re-render carrying a failure reason, e.g. /wifi?err=connect
+  if(_httperrorcallback != NULL && server->hasArg(F("err"))){
+    page += _httperrorcallback(server->arg(F("err")));
+  }
   if (scan) {
     #ifdef WM_DEBUG_LEVEL
     // DEBUG_WM(WM_DEBUG_DEV,"refresh flag:",server->hasArg(F("refresh")));
     #endif
-    WiFi_scanNetworks(server->hasArg(F("refresh")),false); //wifiscan, force if arg refresh
+    WiFi_scanNetworks(server->hasArg(F("refresh")),true); //wifiscan, force if arg refresh, async so the scan never stalls the caller
     page += getScanItemOut();
   }
   String pitem = "";
@@ -1889,6 +1892,18 @@ void WiFiManager::handleWifiSave() {
   }
 
   if(_paramsInWifi) doParamSave();
+
+  // Deferred save: hand off to the app, which owns the connect attempt and may verify
+  // the credentials before answering the client. Note the handler frame is still live,
+  // so the callback is free to call server->send(). We must not set connect=true here,
+  // that is what keeps processConfigPortal from blocking on waitForConnectResult().
+  if(_deferredsavecallback != NULL){
+    _pendingSsid = _ssid;
+    _pendingPass = _pass;
+    _savePending = true;
+    _deferredsavecallback(_ssid, _pass); // @CALLBACK
+    return;
+  }
 
   String page;
 
@@ -2846,6 +2861,41 @@ void WiFiManager::setWebServerCallback( std::function<void()> func ) {
  */
 void WiFiManager::setSaveConfigCallback( std::function<void()> func ) {
   _savewificallback = func;
+}
+
+/**
+ * setDeferredSaveCallback, hand the submitted ssid/pass to the app instead of
+ * connecting and rendering the built in saved page
+ * @access public
+ * @param {[type]} func  called as func(ssid, pass) from inside handleWifiSave
+ */
+void WiFiManager::setDeferredSaveCallback( std::function<void(const String&, const String&)> func ) {
+  _deferredsavecallback = func;
+}
+
+/**
+ * setHttpErrorCallback, supply the banner html used when a page is re-rendered
+ * with an error reason in the "err" query argument
+ * @access public
+ * @param {[type]} func  called as func(errCode), result is prepended to the page
+ */
+void WiFiManager::setHttpErrorCallback( std::function<String(const String&)> func ) {
+  _httperrorcallback = func;
+}
+
+/**
+ * takePendingSave, read and clear a deferred save request
+ * @access public
+ * @return true if a save was waiting, false otherwise
+ */
+bool WiFiManager::takePendingSave(String &ssid, String &pass) {
+  if(!_savePending) return false;
+  _savePending = false;
+  ssid = _pendingSsid;
+  pass = _pendingPass;
+  _pendingSsid = "";
+  _pendingPass = "";
+  return true;
 }
 
 /**

@@ -322,6 +322,17 @@ class WiFiManager
 
     //called when wifi settings have been changed and connection was successful ( or setBreakAfterConfig(true) )
     void          setSaveConfigCallback( std::function<void()> func );
+    // Deferred save: when a callback is registered, handleWifiSave stashes the submitted
+    // credentials and invokes the callback *in place of* rendering its own "Saved!" page
+    // and signalling connect=true. The handler frame is still live, so the callback may
+    // call server->send(). The app then owns the connect attempt, and can verify the
+    // credentials asynchronously before telling the user whether they worked.
+    void          setDeferredSaveCallback( std::function<void(const String&, const String&)> func );
+    // Returns true once, and clears the pending flag. False if no save is waiting.
+    bool          takePendingSave(String &ssid, String &pass);
+    // handleWifi re-renders with this HTML prepended when the request carries an "err"
+    // argument, so the app owns the wording instead of the language files.
+    void          setHttpErrorCallback( std::function<String(const String&)> func );
 
     //called when saving params-in-wifi or params before anything else happens (eg wifi)
     void          setPreSaveConfigCallback( std::function<void()> func );
@@ -851,6 +862,11 @@ protected:
     std::function<void()> _webservercallback;
     std::function<void()> _savewificallback;
     std::function<void()> _presavewificallback;
+    std::function<void(const String&, const String&)> _deferredsavecallback;
+    std::function<String(const String&)> _httperrorcallback;
+    bool          _savePending                         = false;
+    String        _pendingSsid                         = "";
+    String        _pendingPass                         = "";
     std::function<void()> _presaveparamscallback;
     std::function<void()> _saveparamscallback;
     std::function<void()> _resetcallback;
